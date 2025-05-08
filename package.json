@@ -1,0 +1,17 @@
+{
+  "name": "2d-game-demo",
+  "version": "1.0.0",
+  "description": "一个简单的2D游戏Demo",
+  "main": "src/game.js",
+  "scripts": {
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.60.0"
+  },
+  "devDependencies": {
+    "vite": "^4.4.0"
+  }
+} 
