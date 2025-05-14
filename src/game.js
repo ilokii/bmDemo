@@ -50,7 +50,7 @@ const initialMatrix = [
     [8, 8, 7, 1, 7, 7]
 ];
 
-import level1 from './config/levels/level1.json';
+import level2 from './config/levels/level2.json';
 
 // 预加载资源
 function preload() {
@@ -80,12 +80,20 @@ function drawPerson(graphics, x, y, color, size) {
  * @param {number} y 左上角y
  * @param {number} color 颜色（十六进制）
  * @param {number} size 边长
+ * @param {number} capacity 容量
  */
-function drawCar(graphics, x, y, color, size) {
+function drawCar(graphics, x, y, color, size, capacity) {
     graphics.fillStyle(color, 1);
     graphics.fillRect(x, y, size, size);
     graphics.lineStyle(2, 0xffffff, 1);
     graphics.strokeRect(x, y, size, size);
+    
+    // 显示容量
+    if (capacity) {
+        graphics.fillStyle(0xffffff, 0.7);
+        graphics.fillCircle(x + size/2, y + size/2, size/4);
+        // 不能使用setFontSize和fillText方法，这里只绘制圆形背景
+    }
 }
 
 // 生成蛇形编号映射（支持mask挖空与自定义走向）
@@ -127,7 +135,7 @@ let carSlotPositions = []; // 车位中心坐标
 let isAnimating = false; // 动画锁
 
 // 新增：车位车辆对象管理
-let carSlotObjArr = []; // [{color, passenger, graphics, slotIdx}]
+let carSlotObjArr = []; // [{color, passenger, capacity, graphics, slotIdx}]
 let peopleQueue = []; // [{color, graphics, idx}]
 let peopleGridMap = [];
 let peopleQueueStartPos = [];
@@ -183,7 +191,7 @@ function create() {
     peopleGridMap = getPeopleGridIndexMap(peopleMask);
 
     // 获取item_queue
-    const itemQueue = level1.item_queue;
+    const itemQueue = level2.item_queue;
     peopleQueue = [];
     peopleQueueStartPos = [];
     peopleQueueEndIdx = 0;
@@ -287,7 +295,7 @@ function create() {
     }
 
     // 初始化车辆网格和车位状态
-    const initialMatrix = level1.initial_matrix;
+    const initialMatrix = level2.initial_matrix;
     carGridState = initialMatrix.map(row => row.slice());
     carSlotState = Array(carSlotCount).fill(0);
     carGraphicsGrid = Array(gridSize).fill(0).map(() => Array(gridSize).fill(null));
@@ -296,7 +304,7 @@ function create() {
     // 车位车辆对象管理
     carSlotObjArr = [];
     for (let i = 0; i < carSlotCount; i++) {
-        carSlotObjArr.push({ color: 0, passenger: 0, graphics: null, slotIdx: i });
+        carSlotObjArr.push({ color: 0, passenger: 0, capacity: 0, graphics: null, slotIdx: i });
     }
 
     // 渲染车辆（用Phaser.GameObjects.Graphics对象，便于动画和高亮）
@@ -304,16 +312,30 @@ function create() {
     const carSize = cellSize - carMargin * 2;
     for (let row = 0; row < carGridState.length; row++) {
         for (let col = 0; col < carGridState[row].length; col++) {
-            const num = carGridState[row][col];
-            if (num === 0) continue;
+            const carInfo = carGridState[row][col];
+            if (!carInfo || carInfo[0] === 0) continue;
+            const num = carInfo[0];
+            const capacity = carInfo[1];
             const color = COLOR_MAP[num];
             if (!color) continue;
             const x = startX + carMargin + col * cellSize;
             const y = currentY + carMargin + row * cellSize;
             const carG = this.add.graphics();
-            drawCar(carG, 0, 0, color, carSize);
+            drawCar(carG, 0, 0, color, carSize, capacity);
             carG.setPosition(x, y);
             carG.setDepth(10);
+            carG.capacity = capacity; // 存储容量
+            carG.colorNum = num; // 存储颜色编号
+            
+            // 添加容量文本
+            const capacityText = this.add.text(
+                x + carSize/2,
+                y + carSize/2,
+                capacity.toString(),
+                { fontSize: '14px', color: '#000000', fontStyle: 'bold' }
+            ).setOrigin(0.5, 0.5).setDepth(15);
+            carG.capacityText = capacityText;
+            
             carG.setInteractive(new Phaser.Geom.Rectangle(0, 0, carSize, carSize), Phaser.Geom.Rectangle.Contains);
             carGraphicsGrid[row][col] = carG;
         }
@@ -332,7 +354,9 @@ function create() {
             for (let col = 0; col < gridSize; col++) {
                 const carG = carGraphicsGrid[row][col];
                 if (!carG) continue;
-                const num = carGridState[row][col];
+                const carInfo = carGridState[row][col];
+                if (!carInfo) continue;
+                const num = carInfo[0];
                 // 判定是否可移动
                 let movable = false;
                 if (carSlotState.includes(0)) {
@@ -346,7 +370,7 @@ function create() {
                         for (const [dr, dc] of dirs) {
                             const nr = row + dr, nc = col + dc;
                             if (nr >= 0 && nr < gridSize && nc >= 0 && nc < gridSize) {
-                                if (carGridState[nr][nc] === 0) {
+                                if (!carGridState[nr][nc] || carGridState[nr][nc][0] === 0) {
                                     movable = true;
                                     break;
                                 }
@@ -356,7 +380,7 @@ function create() {
                 }
                 // 高亮
                 carG.clear();
-                drawCar(carG, 0, 0, COLOR_MAP[num], carSize);
+                drawCar(carG, 0, 0, COLOR_MAP[num], carSize, carG.capacity);
                 if (movable) {
                     carG.lineStyle(4, 0x000000, 1);
                     carG.strokeRect(0, 0, carSize, carSize);
@@ -390,25 +414,33 @@ function create() {
                     duration: 300,
                     onComplete: () => {
                         // 更新状态
-                        carSlotState[slotIdx] = carGridState[row][col];
+                        const carInfo = carGridState[row][col];
+                        carSlotState[slotIdx] = carInfo;
                         carGridState[row][col] = 0;
                         // 车位车辆对象
-                        carSlotObjArr[slotIdx].color = carSlotState[slotIdx];
+                        carSlotObjArr[slotIdx].color = carInfo[0];
+                        carSlotObjArr[slotIdx].capacity = carInfo[1];
                         carSlotObjArr[slotIdx].passenger = 0;
                         carSlotObjArr[slotIdx].graphics = carG;
+                        
+                        // 移动容量文本
+                        if (carG.capacityText) {
+                            carG.capacityText.destroy();
+                        }
+                        
                         // 修正：乘客数文本对象应挂在carSlotObjArr[slotIdx]上
                         if (carSlotObjArr[slotIdx].passengerText) {
                             carSlotObjArr[slotIdx].passengerText.destroy();
                         }
                         carG.clear();
-                        drawCar(carG, 0, 0, COLOR_MAP[carSlotState[slotIdx]], carSize);
+                        drawCar(carG, 0, 0, COLOR_MAP[carInfo[0]], carSize);
                         // 显示乘客数（确保与对象绑定）
                         const passengerText = this.add.text(
-                            toX + carSize / 2 - 8,
-                            toY - carSize / 2 + 8,
-                            '0',
-                            { fontSize: '14px', color: '#222', fontStyle: 'bold' }
-                        ).setOrigin(1, 0).setDepth(30);
+                            toX, // 居中
+                            toY, // 居中
+                            `0/${carInfo[1]}`,
+                            { fontSize: '18px', color: '#222', fontStyle: 'bold' }
+                        ).setOrigin(0.5, 0.5).setDepth(30);
                         carSlotObjArr[slotIdx].passengerText = passengerText;
                         carG.passengerText = passengerText;
                         carG.disableInteractive();
@@ -420,6 +452,16 @@ function create() {
                         tryMovePeopleToCar.call(this);
                     }
                 });
+                
+                // 同步移动容量文本
+                if (carG.capacityText) {
+                    this.tweens.add({
+                        targets: carG.capacityText,
+                        x: toX,
+                        y: toY,
+                        duration: 300
+                    });
+                }
             });
         }
     }
@@ -433,8 +475,10 @@ function create() {
         // 队首人
         const first = peopleQueue[0];
         if (!first) return;
-        // 找到所有可上车的车位（颜色相同且乘客<3）
-        let candidates = carSlotObjArr.filter(obj => obj.color && COLOR_MAP[obj.color] === first.color && obj.passenger < 3);
+        // 找到所有可上车的车位（颜色相同且乘客<容量）
+        let candidates = carSlotObjArr.filter(obj => 
+            obj.color && COLOR_MAP[obj.color] === first.color && obj.passenger < obj.capacity
+        );
         if (candidates.length === 0) return;
         // 优先左侧
         candidates.sort((a, b) => a.slotIdx - b.slotIdx);
@@ -460,10 +504,12 @@ function create() {
                 // 乘客数+1，更新显示
                 car.passenger++;
                 if (car.passengerText) {
-                    car.passengerText.setText(car.passenger.toString());
+                    car.passengerText.setText(`${car.passenger}/${car.capacity}`);
+                    car.passengerText.setPosition(carSlotPositions[car.slotIdx].x, carSlotPositions[car.slotIdx].y);
                 }
                 if (car.graphics && car.graphics.passengerText) {
-                    car.graphics.passengerText.setText(car.passenger.toString());
+                    car.graphics.passengerText.setText(`${car.passenger}/${car.capacity}`);
+                    car.graphics.passengerText.setPosition(carSlotPositions[car.slotIdx].x, carSlotPositions[car.slotIdx].y);
                 }
                 // 队列推进
                 peopleQueue.shift();
@@ -502,7 +548,7 @@ function create() {
                             if (finishedCount === peopleQueue.length) {
                                 isAnimating = false;
                                 // 车满则离场
-                                if (car.passenger >= 3) {
+                                if (car.passenger >= car.capacity) {
                                     carLeave.call(this, car);
                                 } else {
                                     tryMovePeopleToCar.call(this);
@@ -528,9 +574,11 @@ function create() {
             duration: 300,
             onComplete: () => {
                 if (car.passengerText) car.passengerText.destroy();
+                if (car.graphics && car.graphics.capacityText) car.graphics.capacityText.destroy();
                 car.graphics.destroy();
                 car.color = 0;
                 car.passenger = 0;
+                car.capacity = 0;
                 car.graphics = null;
                 car.passengerText = null;
                 carSlotState[car.slotIdx] = 0;
@@ -539,6 +587,16 @@ function create() {
                 tryMovePeopleToCar.call(this);
             }
         });
+        
+        // 同步处理容量文本
+        if (car.graphics && car.graphics.capacityText) {
+            this.tweens.add({
+                targets: car.graphics.capacityText,
+                y: car.graphics.y - 200,
+                alpha: 0,
+                duration: 300
+            });
+        }
     }
 }
 
