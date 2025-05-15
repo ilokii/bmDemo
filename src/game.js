@@ -25,6 +25,15 @@ const game = new Phaser.Game(config);
 let score = 0;
 let scoreText;
 let target;
+let arrivalCounter = 0; // 新增：用于记录车辆到达顺序的计数器
+
+// 动画时长配置
+const ANIMATION_DURATION = {
+    CAR_MOVE_TO_SLOT: 300,     // 车辆移动到车位
+    PERSON_MOVE_TO_CAR: 150,   // 人移动到车上
+    PERSON_QUEUE_SHIFT: 150,   // 人队列前移
+    CAR_LEAVE: 300             // 车辆离场
+};
 
 // 数字与颜色的映射关系
 const COLOR_MAP = {
@@ -50,7 +59,7 @@ const initialMatrix = [
     [8, 8, 7, 1, 7, 7]
 ];
 
-import level2 from './config/levels/level2.json';
+import level2 from './config/levels/level3.json';
 
 // 预加载资源
 function preload() {
@@ -129,7 +138,7 @@ function getPeopleGridIndexMap(mask) {
 
 // 新增：车辆和车位状态管理
 let carGridState = []; // 车辆网格状态（二维数组）
-let carSlotState = []; // 车位状态（长度为6）
+let carSlotState = []; // 车位状态（长度为vacancy）
 let carGraphicsGrid = []; // 车辆图形对象二维数组
 let carSlotPositions = []; // 车位中心坐标
 let isAnimating = false; // 动画锁
@@ -148,7 +157,7 @@ function create() {
 
     // 区域尺寸与格子参数
     const gridSize = 6;
-    const carSlotCount = 6;
+    const carSlotCount = level2.vacancy; // 从关卡配置中读取车位数量
     const peopleCols = 6; // 上方6列
     const peopleRows = 5;
     const cellSize = 48;
@@ -304,7 +313,14 @@ function create() {
     // 车位车辆对象管理
     carSlotObjArr = [];
     for (let i = 0; i < carSlotCount; i++) {
-        carSlotObjArr.push({ color: 0, passenger: 0, capacity: 0, graphics: null, slotIdx: i });
+        carSlotObjArr.push({ 
+            color: 0, 
+            passenger: 0, 
+            capacity: 0, 
+            graphics: null, 
+            slotIdx: i,
+            arrivalTime: -1 // 新增：记录车辆到达顺序，-1表示空车位
+        });
     }
 
     // 渲染车辆（用Phaser.GameObjects.Graphics对象，便于动画和高亮）
@@ -411,7 +427,7 @@ function create() {
                     targets: carG,
                     x: toX - carSize / 2,
                     y: toY - carSize / 2,
-                    duration: 300,
+                    duration: ANIMATION_DURATION.CAR_MOVE_TO_SLOT,
                     onComplete: () => {
                         // 更新状态
                         const carInfo = carGridState[row][col];
@@ -422,6 +438,7 @@ function create() {
                         carSlotObjArr[slotIdx].capacity = carInfo[1];
                         carSlotObjArr[slotIdx].passenger = 0;
                         carSlotObjArr[slotIdx].graphics = carG;
+                        carSlotObjArr[slotIdx].arrivalTime = ++arrivalCounter; // 新增：记录到达顺序
                         
                         // 移动容量文本
                         if (carG.capacityText) {
@@ -459,7 +476,7 @@ function create() {
                         targets: carG.capacityText,
                         x: toX,
                         y: toY,
-                        duration: 300
+                        duration: ANIMATION_DURATION.CAR_MOVE_TO_SLOT
                     });
                 }
             });
@@ -480,8 +497,18 @@ function create() {
             obj.color && COLOR_MAP[obj.color] === first.color && obj.passenger < obj.capacity
         );
         if (candidates.length === 0) return;
-        // 优先左侧
-        candidates.sort((a, b) => a.slotIdx - b.slotIdx);
+        // 按到达顺序排序（先到的优先）
+        candidates.sort((a, b) => {
+            // 如果arrivalTime相同或都是-1，则按车位顺序
+            if (a.arrivalTime === b.arrivalTime) {
+                return a.slotIdx - b.slotIdx;
+            }
+            // 如果有一个是-1，它应该排在后面
+            if (a.arrivalTime === -1) return 1;
+            if (b.arrivalTime === -1) return -1;
+            // 否则按到达顺序排序
+            return a.arrivalTime - b.arrivalTime;
+        });
         const car = candidates[0];
         isAnimating = true;
         // 动画：人移动到车上
@@ -497,7 +524,7 @@ function create() {
             targets: movingPerson,
             x: toX,
             y: toY,
-            duration: 300,
+            duration: ANIMATION_DURATION.PERSON_MOVE_TO_CAR,
             onComplete: () => {
                 // 销毁人
                 movingPerson.destroy();
@@ -541,7 +568,7 @@ function create() {
                     this.tweens.add({
                         targets: g,
                         x, y,
-                        duration: 200,
+                        duration: ANIMATION_DURATION.PERSON_QUEUE_SHIFT,
                         onComplete: () => {
                             finishedCount++;
                             // 最后一个人移动完后，继续判断
@@ -571,7 +598,7 @@ function create() {
             targets: car.graphics,
             y: car.graphics.y - 200,
             alpha: 0,
-            duration: 300,
+            duration: ANIMATION_DURATION.CAR_LEAVE,
             onComplete: () => {
                 if (car.passengerText) car.passengerText.destroy();
                 if (car.graphics && car.graphics.capacityText) car.graphics.capacityText.destroy();
@@ -581,6 +608,7 @@ function create() {
                 car.capacity = 0;
                 car.graphics = null;
                 car.passengerText = null;
+                car.arrivalTime = -1; // 新增：重置到达时间
                 carSlotState[car.slotIdx] = 0;
                 isAnimating = false;
                 updateCarMovable();
@@ -594,7 +622,7 @@ function create() {
                 targets: car.graphics.capacityText,
                 y: car.graphics.y - 200,
                 alpha: 0,
-                duration: 300
+                duration: ANIMATION_DURATION.CAR_LEAVE
             });
         }
     }
