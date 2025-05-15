@@ -30,8 +30,8 @@ let arrivalCounter = 0; // 新增：用于记录车辆到达顺序的计数器
 // 动画时长配置
 const ANIMATION_DURATION = {
     CAR_MOVE_TO_SLOT: 300,     // 车辆移动到车位
-    PERSON_MOVE_TO_CAR: 150,   // 人移动到车上
-    PERSON_QUEUE_SHIFT: 150,   // 人队列前移
+    PERSON_MOVE_TO_CAR: 100,   // 人移动到车上
+    PERSON_QUEUE_SHIFT: 100,   // 人队列前移
     CAR_LEAVE: 300             // 车辆离场
 };
 
